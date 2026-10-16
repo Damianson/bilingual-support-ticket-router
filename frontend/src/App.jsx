@@ -6,16 +6,11 @@ import {
   Filter, 
   RefreshCw, 
   Languages, 
-  Tag, 
   Clock, 
-  CheckCircle, 
-  AlertCircle,
   Database,
   PlusCircle,
   ChevronDown,
   ChevronUp,
-  Trash2,
-  BarChart3,
   Flame,
   Check,
   Search
@@ -23,10 +18,10 @@ import {
 
 const CATEGORIES = [
   { id: 'all', label: 'All Categories' },
-  { id: 'billing', label: 'Billing & Invoicing', badge: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-  { id: 'technical_issue', label: 'Technical Issue', badge: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
-  { id: 'general_inquiry', label: 'General Inquiry', badge: 'bg-blue-100 text-blue-800 border-blue-300' },
-  { id: 'complaint', label: 'Customer Complaint', badge: 'bg-rose-100 text-rose-800 border-rose-300' }
+  { id: 'billing', label: 'Billing & Invoicing' },
+  { id: 'technical_issue', label: 'Technical Issue' },
+  { id: 'general_inquiry', label: 'General Inquiry' },
+  { id: 'complaint', label: 'Customer Complaint' }
 ];
 
 const PRESET_PROMPTS = [
@@ -39,11 +34,11 @@ const PRESET_PROMPTS = [
     text: "CRITICAL: Our single sign-on integration broke after the latest release and 200 employees are locked out. Please escalate immediately."
   },
   {
-    label: "🇫🇷 French Furious Complaint",
-    text: "C'est scandaleux ! J'ai attendu 45 minutes au téléphone pour que votre agent me raccroche au nez. Je demande à parler au directeur du service client."
+    label: "🇫🇷 French Outage Complaint",
+    text: "C'est la troisième fois cette semaine que vos serveurs tombent en panne pendant nos heures d'ouverture. C'est inacceptable et nous perdons des clients !"
   },
   {
-    label: "🇬🇧 English General Question",
+    label: "🇬🇧 English Enterprise Inquiry",
     text: "Hi there! We are evaluating your enterprise plan and would love to know if you offer HIPAA compliance agreements and data residency in the EU."
   }
 ];
@@ -53,7 +48,6 @@ export default function App() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [creating, setCreating] = useState(false);
   
   // Filters
@@ -112,21 +106,6 @@ export default function App() {
     }
   };
 
-  const handleClearTickets = async () => {
-    if (!window.confirm("Are you sure you want to clear all tickets from the database?")) return;
-    setClearing(true);
-    try {
-      const res = await fetch('/api/tickets/clear/', { method: 'DELETE' });
-      if (res.ok) {
-        await fetchTicketsAndStats();
-      }
-    } catch (err) {
-      console.error('Failed to clear tickets:', err);
-    } finally {
-      setClearing(false);
-    }
-  };
-
   const handleCreateTicket = async (e) => {
     e.preventDefault();
     if (!originalText.trim()) return;
@@ -166,7 +145,6 @@ export default function App() {
       if (res.ok) {
         const updated = await res.json();
         setTickets(prev => prev.map(t => t.id === ticketId ? updated : t));
-        // refresh stats in background
         fetch('/api/tickets/stats/')
           .then(r => r.json())
           .then(data => setStats(data));
@@ -176,7 +154,7 @@ export default function App() {
     }
   };
 
-  // Filter tickets
+  // Filter tickets client-side
   const filteredTickets = tickets.filter(ticket => {
     const matchesCategory = categoryFilter === 'all' || ticket.category === categoryFilter;
     const matchesLanguage = languageFilter === 'all' || ticket.detected_language === languageFilter;
@@ -266,31 +244,31 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Top Banner / Header */}
-      <header className="mb-8">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-6">
+      <header className="mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-5">
           <div>
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl text-white shadow-md shadow-blue-500/20">
-                <Languages className="w-7 h-7" />
+                <Languages className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
                   Bilingual Support Ticket Router
                 </h1>
                 <p className="text-sm text-slate-500">
-                  AI-Powered EN/FR Detection, Categorization, Urgency Triage & Cross-Lingual Summaries
+                  Automated EN/FR Language Detection, Category Triage & Cross-Lingual Summaries via Gemini 3.8
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center flex-wrap gap-2">
+          <div className="flex items-center flex-wrap gap-2.5">
             <button
               onClick={handleSeedTickets}
               disabled={seeding || loading}
-              className="inline-flex items-center gap-2 px-3.5 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-sm disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-3.5 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-xs disabled:opacity-50"
             >
               <Database className="w-4 h-4 text-blue-600" />
               {seeding ? 'Seeding...' : 'Seed 16 Tickets'}
@@ -305,59 +283,46 @@ export default function App() {
             </button>
 
             <button
-              onClick={handleClearTickets}
-              disabled={clearing || tickets.length === 0}
-              title="Clear all tickets"
-              className="p-2 border border-slate-300 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition shadow-sm disabled:opacity-40"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-
-            <button
               onClick={fetchTicketsAndStats}
               disabled={loading}
               title="Refresh Inbox"
-              className="p-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition shadow-sm"
+              className="p-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition shadow-xs"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
 
-        {/* Live Metrics Ribbon */}
+        {/* Streamlined Live Metrics Ribbon */}
         {stats && stats.total > 0 && (
-          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-500 font-medium">Total Inbox</span>
-              <p className="text-xl font-bold text-slate-900 mt-0.5">{stats.total}</p>
+          <div className="mt-4 bg-slate-900 text-white px-4 py-3 rounded-xl flex flex-wrap items-center justify-between text-xs font-medium shadow-xs gap-3">
+            <div className="flex items-center gap-3.5 flex-wrap">
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <Inbox className="w-4 h-4 text-blue-400" />
+                Total Tickets: <strong className="text-white text-sm">{stats.total}</strong>
+              </span>
+              <span className="text-slate-700 hidden sm:inline">|</span>
+              <span className="flex items-center gap-1.5">
+                <span>🇫🇷</span> French: <strong className="text-amber-300 text-sm">{stats.languages?.fr || 0}</strong>
+              </span>
+              <span className="text-slate-700 hidden sm:inline">|</span>
+              <span className="flex items-center gap-1.5">
+                <span>🇬🇧</span> English: <strong className="text-sky-300 text-sm">{stats.languages?.en || 0}</strong>
+              </span>
+              <span className="text-slate-700 hidden sm:inline">|</span>
+              <span className="flex items-center gap-1.5 text-rose-300">
+                <Flame className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
+                High Urgency: <strong className="text-white text-sm">{stats.urgencies?.high || 0}</strong>
+              </span>
             </div>
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-500 font-medium">🇫🇷 French Tickets</span>
-              <p className="text-xl font-bold text-amber-700 mt-0.5">{stats.languages.fr || 0}</p>
-            </div>
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-500 font-medium">🇬🇧 English Tickets</span>
-              <p className="text-xl font-bold text-sky-700 mt-0.5">{stats.languages.en || 0}</p>
-            </div>
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-500 font-medium">🔥 High Urgency</span>
-              <p className="text-xl font-bold text-rose-600 mt-0.5">{stats.urgencies.high || 0}</p>
-            </div>
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-500 font-medium">Top Category</span>
-              <p className="text-sm font-bold text-indigo-700 mt-1 capitalize truncate">
-                {Object.entries(stats.categories || {}).sort((a,b) => b[1] - a[1])[0]?.[0]?.replace('_', ' ') || 'None'}
-              </p>
-            </div>
-            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-500 font-medium">Avg AI Confidence</span>
-              <p className="text-xl font-bold text-emerald-600 mt-0.5">{(stats.avg_confidence * 100).toFixed(0)}%</p>
+            <div className="text-[11px] text-slate-400 hidden md:block">
+              Engine: <span className="text-emerald-400 font-mono font-semibold">Gemini 3.8 Flash</span>
             </div>
           </div>
         )}
 
         {/* Filters and Search Bar */}
-        <div className="mt-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+        <div className="mt-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             {/* Search Input */}
             <div className="relative flex-1 max-w-md">
@@ -463,11 +428,11 @@ export default function App() {
             <p className="text-slate-500 text-sm">Loading tickets from database...</p>
           </div>
         ) : filteredTickets.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-2xl border border-slate-200 shadow-sm">
+          <div className="text-center py-20 bg-white rounded-2xl border border-slate-200 shadow-xs">
             <Inbox className="w-12 h-12 mx-auto text-slate-300 mb-3" />
             <h3 className="text-base font-bold text-slate-800">No tickets found</h3>
             <p className="text-slate-500 text-sm mt-1 max-w-sm mx-auto">
-              Get started by clicking <strong>"Seed 16 Tickets"</strong> or use the <strong>"New Ticket"</strong> button to route a custom customer message.
+              Click <strong>"Seed 16 Tickets"</strong> or use <strong>"New Ticket"</strong> to submit and route customer messages through Gemini.
             </p>
           </div>
         ) : (

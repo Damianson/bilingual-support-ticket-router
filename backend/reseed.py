@@ -34,3 +34,4 @@ for idx, sample in enumerate(SAMPLE_TICKETS, start=1):
           f"Conf: {ticket.confidence_score*100:.0f}% ({elapsed:.2f}s) - {ticket.customer_name}")
 
 print(f"\nSuccessfully seeded all {Ticket.objects.count()} tickets with live Gemini 3.8 Flash triage!")
+
