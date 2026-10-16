@@ -113,6 +113,13 @@ def analyze_ticket_with_gemini(ticket_text: str) -> Dict[str, Any]:
             )
 
             raw_output = response.text.strip()
+            if raw_output.startswith("```"):
+                lines = raw_output.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                raw_output = "\n".join(lines).strip()
             return json.loads(raw_output)
 
         except (ServerError, APIError) as exc:

@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Count, Avg
@@ -6,6 +6,9 @@ from .models import Ticket
 from .serializers import TicketSerializer
 from .ai_service import analyze_ticket_with_gemini
 from .seed_data import SAMPLE_TICKETS
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TicketViewSet(viewsets.ModelViewSet):
     """
@@ -46,7 +49,13 @@ class TicketViewSet(viewsets.ModelViewSet):
         Intercepts creation to enrich ticket with Gemini AI triage data.
         """
         original_text = serializer.validated_data.get('original_text', '')
-        ai_data = analyze_ticket_with_gemini(original_text)
+        try:
+            ai_data = analyze_ticket_with_gemini(original_text)
+        except Exception as exc:
+            logger.error("AI triage failed for new ticket: %s", exc)
+            raise serializers.ValidationError({
+                "original_text": f"AI triage service unavailable: {str(exc)}"
+            })
 
         serializer.save(
             detected_language=ai_data.get('detected_language', 'unknown'),
@@ -61,29 +70,32 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def seed(self, request):
         """
-        Seeds 16 realistic bilingual tickets across categories,
+        Seeds realistic bilingual tickets across categories,
         analyzing each via the Gemini AI router.
         """
         created = []
         for sample in SAMPLE_TICKETS:
-            # Skip duplicates if already present
             if Ticket.objects.filter(original_text=sample['original_text']).exists():
                 continue
 
-            ai_data = analyze_ticket_with_gemini(sample['original_text'])
-            ticket = Ticket.objects.create(
-                customer_name=sample['customer_name'],
-                customer_email=sample['customer_email'],
-                original_text=sample['original_text'],
-                detected_language=ai_data.get('detected_language', 'unknown'),
-                category=ai_data.get('category', 'general_inquiry'),
-                urgency=ai_data.get('urgency', 'medium'),
-                translated_summary=ai_data.get('translated_summary', ''),
-                confidence_score=ai_data.get('confidence_score', 0.0),
-                reasoning=ai_data.get('reasoning', ''),
-                status='new',
-            )
-            created.append(ticket)
+            try:
+                ai_data = analyze_ticket_with_gemini(sample['original_text'])
+                ticket = Ticket.objects.create(
+                    customer_name=sample['customer_name'],
+                    customer_email=sample['customer_email'],
+                    original_text=sample['original_text'],
+                    detected_language=ai_data.get('detected_language', 'unknown'),
+                    category=ai_data.get('category', 'general_inquiry'),
+                    urgency=ai_data.get('urgency', 'medium'),
+                    translated_summary=ai_data.get('translated_summary', ''),
+                    confidence_score=ai_data.get('confidence_score', 0.0),
+                    reasoning=ai_data.get('reasoning', ''),
+                    status='new',
+                )
+                created.append(ticket)
+            except Exception as exc:
+                logger.warning("Failed to analyze sample ticket during seed: %s", exc)
+                continue
 
         serializer = self.get_serializer(created, many=True)
         return Response({
@@ -95,7 +107,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['delete'])
     def clear(self, request):
         """
-        Wipes all tickets from the database for easy testing reset.
+        Wipes all tickets from the database for testing reset.
         """
         count, _ = Ticket.objects.all().delete()
         return Response({
@@ -107,25 +119,31 @@ class TicketViewSet(viewsets.ModelViewSet):
     def stats(self, request):
         """
         Returns aggregated routing statistics across all tickets.
-        Useful for executive dashboard summaries and metrics.
+        Provides metrics for volume, language distribution, urgency, and statuses.
         """
         total = Ticket.objects.count()
         if total == 0:
             return Response({
                 "total": 0,
+                "unresolved": 0,
                 "languages": {"fr": 0, "en": 0},
                 "categories": {},
                 "urgencies": {"high": 0, "medium": 0, "low": 0},
+                "statuses": {"new": 0, "in_progress": 0, "resolved": 0},
                 "avg_confidence": 0.0
             })
 
         lang_counts = dict(Ticket.objects.values_list('detected_language').annotate(c=Count('id')))
         cat_counts = dict(Ticket.objects.values_list('category').annotate(c=Count('id')))
         urgency_counts = dict(Ticket.objects.values_list('urgency').annotate(c=Count('id')))
+        status_counts = dict(Ticket.objects.values_list('status').annotate(c=Count('id')))
         avg_conf = Ticket.objects.aggregate(Avg('confidence_score'))['confidence_score__avg'] or 0.0
+
+        unresolved = status_counts.get('new', 0) + status_counts.get('in_progress', 0)
 
         return Response({
             "total": total,
+            "unresolved": unresolved,
             "languages": {
                 "fr": lang_counts.get('fr', 0),
                 "en": lang_counts.get('en', 0),
@@ -135,6 +153,11 @@ class TicketViewSet(viewsets.ModelViewSet):
                 "high": urgency_counts.get('high', 0),
                 "medium": urgency_counts.get('medium', 0),
                 "low": urgency_counts.get('low', 0),
+            },
+            "statuses": {
+                "new": status_counts.get('new', 0),
+                "in_progress": status_counts.get('in_progress', 0),
+                "resolved": status_counts.get('resolved', 0),
             },
             "avg_confidence": round(avg_conf, 2),
         })

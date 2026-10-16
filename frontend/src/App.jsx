@@ -1,19 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Inbox, 
-  Send, 
-  Sparkles, 
+  Search, 
   Filter, 
   RefreshCw, 
   Languages, 
   Clock, 
   Database,
-  PlusCircle,
+  Plus,
   ChevronDown,
   ChevronUp,
-  Flame,
-  Check,
-  Search
+  ArrowRightLeft,
+  CheckCircle2,
+  AlertCircle,
+  X
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -24,21 +24,33 @@ const CATEGORIES = [
   { id: 'complaint', label: 'Customer Complaint' }
 ];
 
-const PRESET_PROMPTS = [
+const PRESET_SCENARIOS = [
   {
-    label: "🇫🇷 French Billing Overcharge",
+    id: 'fr-billing',
+    label: 'Billing Dispute (FR)',
+    customerName: 'Jean-Luc Laurent',
+    customerEmail: 'j.laurent@enterprise.fr',
     text: "Bonjour, j'ai remarqué un prélèvement injustifié de 89€ sur ma facture du 10 octobre. Pouvez-vous vérifier et procéder au remboursement rapidement ?"
   },
   {
-    label: "🇬🇧 English Critical Bug",
+    id: 'en-outage',
+    label: 'SSO Outage (EN)',
+    customerName: 'Alex Rivera',
+    customerEmail: 'alex.r@apextech.com',
     text: "CRITICAL: Our single sign-on integration broke after the latest release and 200 employees are locked out. Please escalate immediately."
   },
   {
-    label: "🇫🇷 French Outage Complaint",
+    id: 'fr-downtime',
+    label: 'Service Reliability (FR)',
+    customerName: 'Julien Moreau',
+    customerEmail: 'j.moreau@commerce-express.fr',
     text: "C'est la troisième fois cette semaine que vos serveurs tombent en panne pendant nos heures d'ouverture. C'est inacceptable et nous perdons des clients !"
   },
   {
-    label: "🇬🇧 English Enterprise Inquiry",
+    id: 'en-enterprise',
+    label: 'Enterprise Compliance (EN)',
+    customerName: 'Sarah Jenkins',
+    customerEmail: 'sarah.j@novasoft.io',
     text: "Hi there! We are evaluating your enterprise plan and would love to know if you offer HIPAA compliance agreements and data residency in the EU."
   }
 ];
@@ -49,21 +61,23 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
   
-  // Filters
+  // Filter state
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Expanded diagnostics state
   const [expandedTicketId, setExpandedTicketId] = useState(null);
 
-  // New Ticket Form State
+  // New ticket form state
+  const [showNewModal, setShowNewModal] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [originalText, setOriginalText] = useState('');
-  const [showNewModal, setShowNewModal] = useState(false);
 
   useEffect(() => {
     fetchTicketsAndStats();
@@ -71,6 +85,7 @@ export default function App() {
 
   const fetchTicketsAndStats = async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
       const [ticketsRes, statsRes] = await Promise.all([
         fetch('/api/tickets/'),
@@ -87,6 +102,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Failed to load tickets or stats:', err);
+      setErrorMessage('Unable to synchronize with backend service.');
     } finally {
       setLoading(false);
     }
@@ -94,13 +110,18 @@ export default function App() {
 
   const handleSeedTickets = async () => {
     setSeeding(true);
+    setErrorMessage(null);
     try {
       const res = await fetch('/api/tickets/seed/', { method: 'POST' });
       if (res.ok) {
         await fetchTicketsAndStats();
+      } else {
+        const errData = await res.json();
+        setErrorMessage(errData.detail || 'Seeding failed.');
       }
     } catch (err) {
       console.error('Failed to seed tickets:', err);
+      setErrorMessage('Network error while triggering seed routine.');
     } finally {
       setSeeding(false);
     }
@@ -111,25 +132,32 @@ export default function App() {
     if (!originalText.trim()) return;
 
     setCreating(true);
+    setErrorMessage(null);
     try {
       const res = await fetch('/api/tickets/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_name: customerName || 'Anonymous Customer',
-          customer_email: customerEmail || 'customer@example.com',
-          original_text: originalText,
+          customer_name: customerName.trim() || 'Anonymous Customer',
+          customer_email: customerEmail.trim() || 'customer@example.com',
+          original_text: originalText.trim(),
         }),
       });
+
       if (res.ok) {
         setOriginalText('');
         setCustomerName('');
         setCustomerEmail('');
         setShowNewModal(false);
         await fetchTicketsAndStats();
+      } else {
+        const errData = await res.json();
+        const msg = errData.original_text || errData.detail || 'Ticket triage submission failed.';
+        setErrorMessage(Array.isArray(msg) ? msg.join(' ') : msg);
       }
     } catch (err) {
       console.error('Failed to create ticket:', err);
+      setErrorMessage('Network error while contacting triage engine.');
     } finally {
       setCreating(false);
     }
@@ -154,75 +182,110 @@ export default function App() {
     }
   };
 
-  // Filter tickets client-side
-  const filteredTickets = tickets.filter(ticket => {
-    const matchesCategory = categoryFilter === 'all' || ticket.category === categoryFilter;
-    const matchesLanguage = languageFilter === 'all' || ticket.detected_language === languageFilter;
-    const matchesUrgency = urgencyFilter === 'all' || ticket.urgency === urgencyFilter;
-    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
-    
-    const matchesSearch = searchQuery === '' || 
-      ticket.original_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (ticket.translated_summary && ticket.translated_summary.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    return matchesCategory && matchesLanguage && matchesUrgency && matchesStatus && matchesSearch;
-  });
-
-  const getCategoryBadge = (cat) => {
-    switch (cat) {
-      case 'billing':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">Billing</span>;
-      case 'technical_issue':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 border border-indigo-300">Technical Issue</span>;
-      case 'complaint':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-300">Complaint</span>;
-      case 'general_inquiry':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">General Inquiry</span>;
-      default:
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 border border-gray-300">Unclassified</span>;
-    }
+  const applyPreset = (preset) => {
+    setCustomerName(preset.customerName);
+    setCustomerEmail(preset.customerEmail);
+    setOriginalText(preset.text);
   };
 
-  const getLanguageBadge = (lang) => {
-    if (lang === 'fr') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
-          <span>🇫🇷</span> French
-        </span>
-      );
-    }
-    if (lang === 'en') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-900 border border-sky-300">
-          <span>🇬🇧</span> English
-        </span>
-      );
-    }
+  const resetFilters = () => {
+    setLanguageFilter('all');
+    setCategoryFilter('all');
+    setUrgencyFilter('all');
+    setStatusFilter('all');
+    setSearchQuery('');
+  };
+
+  const isFilterActive = useMemo(() => {
+    return languageFilter !== 'all' || 
+           categoryFilter !== 'all' || 
+           urgencyFilter !== 'all' || 
+           statusFilter !== 'all' || 
+           searchQuery.trim() !== '';
+  }, [languageFilter, categoryFilter, urgencyFilter, statusFilter, searchQuery]);
+
+  const filteredTickets = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    return tickets.filter(ticket => {
+      if (categoryFilter !== 'all' && ticket.category !== categoryFilter) return false;
+      if (languageFilter !== 'all' && ticket.detected_language !== languageFilter) return false;
+      if (urgencyFilter !== 'all' && ticket.urgency !== urgencyFilter) return false;
+      if (statusFilter !== 'all' && ticket.status !== statusFilter) return false;
+
+      if (query) {
+        const textMatch = ticket.original_text?.toLowerCase().includes(query);
+        const nameMatch = ticket.customer_name?.toLowerCase().includes(query);
+        const emailMatch = ticket.customer_email?.toLowerCase().includes(query);
+        const summaryMatch = ticket.translated_summary?.toLowerCase().includes(query);
+        return textMatch || nameMatch || emailMatch || summaryMatch;
+      }
+      return true;
+    });
+  }, [tickets, categoryFilter, languageFilter, urgencyFilter, statusFilter, searchQuery]);
+
+  const renderLanguageBadge = (lang) => {
+    const isFr = lang === 'fr';
+    const isEn = lang === 'en';
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
-        <span>🌐</span> {lang || 'Unknown'}
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
+        {isFr ? 'FR' : isEn ? 'EN' : lang || 'UNKNOWN'}
       </span>
     );
   };
 
-  const getUrgencyBadge = (urgency) => {
+  const renderCategoryBadge = (category) => {
+    switch (category) {
+      case 'billing':
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+            Billing
+          </span>
+        );
+      case 'technical_issue':
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+            Technical Issue
+          </span>
+        );
+      case 'complaint':
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
+            Customer Complaint
+          </span>
+        );
+      case 'general_inquiry':
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200">
+            General Inquiry
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+            Unassigned
+          </span>
+        );
+    }
+  };
+
+  const renderUrgencyBadge = (urgency) => {
     switch (urgency) {
       case 'high':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-red-100 text-red-800 border border-red-300">
-            <Flame className="w-3 h-3 text-red-600 fill-red-600" /> High
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+            <AlertCircle className="w-3 h-3 text-rose-600" />
+            High
           </span>
         );
       case 'medium':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
             Medium
           </span>
         );
       case 'low':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200">
             Low
           </span>
         );
@@ -231,100 +294,167 @@ export default function App() {
     }
   };
 
-  const getStatusBadge = (status) => {
+  const renderStatusBadge = (status) => {
     switch (status) {
       case 'resolved':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-green-100 text-green-800 border border-green-300"><Check className="w-3 h-3" /> Resolved</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <CheckCircle2 className="w-3 h-3" />
+            Resolved
+          </span>
+        );
       case 'in_progress':
-        return <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300">In Progress</span>;
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+            In Progress
+          </span>
+        );
       case 'new':
       default:
-        return <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">New</span>;
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+            New
+          </span>
+        );
     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Top Banner / Header */}
-      <header className="mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-5">
-          <div>
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Top Application Bar */}
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl text-white shadow-md shadow-blue-500/20">
-                <Languages className="w-6 h-6" />
+              <div className="p-2 bg-slate-900 text-white rounded-lg">
+                <Languages className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-                  Bilingual Support Ticket Router
-                </h1>
-                <p className="text-sm text-slate-500">
-                  Automated EN/FR Language Detection, Category Triage & Cross-Lingual Summaries via Gemini 3.8
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-900 text-base">
+                    Bilingual Support Ticket Router
+                  </span>
+                  <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                    EN / FR Triage
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 hidden md:block">
+                  Automated language detection, queue classification, and cross-lingual summarization
                 </p>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-center flex-wrap gap-2.5">
-            <button
-              onClick={handleSeedTickets}
-              disabled={seeding || loading}
-              className="inline-flex items-center gap-2 px-3.5 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-xs disabled:opacity-50"
-            >
-              <Database className="w-4 h-4 text-blue-600" />
-              {seeding ? 'Seeding...' : 'Seed 16 Tickets'}
-            </button>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500 pr-2 border-r border-slate-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Gemini 3.8 Flash Active</span>
+              </div>
 
-            <button
-              onClick={() => setShowNewModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition shadow-sm shadow-blue-600/30"
-            >
-              <PlusCircle className="w-4 h-4" />
-              New Ticket
-            </button>
+              <button
+                type="button"
+                onClick={handleSeedTickets}
+                disabled={seeding || loading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded-md text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                <Database className="w-3.5 h-3.5 text-slate-500" />
+                <span>{seeding ? 'Seeding...' : 'Seed Dataset'}</span>
+              </button>
 
-            <button
-              onClick={fetchTicketsAndStats}
-              disabled={loading}
-              title="Refresh Inbox"
-              className="p-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition shadow-xs"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowNewModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Ticket</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={fetchTicketsAndStats}
+                disabled={loading}
+                title="Refresh Tickets"
+                className="p-1.5 border border-slate-300 rounded-md text-slate-600 hover:bg-slate-50 transition"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
         </div>
+      </nav>
 
-        {/* Streamlined Live Metrics Ribbon */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+        {/* Error notification banner */}
+        {errorMessage && (
+          <div className="flex items-center justify-between p-3.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="text-rose-600 hover:text-rose-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Operational Metrics Panel */}
         {stats && stats.total > 0 && (
-          <div className="mt-4 bg-slate-900 text-white px-4 py-3 rounded-xl flex flex-wrap items-center justify-between text-xs font-medium shadow-xs gap-3">
-            <div className="flex items-center gap-3.5 flex-wrap">
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <Inbox className="w-4 h-4 text-blue-400" />
-                Total Tickets: <strong className="text-white text-sm">{stats.total}</strong>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Total Ingested
               </span>
-              <span className="text-slate-700 hidden sm:inline">|</span>
-              <span className="flex items-center gap-1.5">
-                <span>🇫🇷</span> French: <strong className="text-amber-300 text-sm">{stats.languages?.fr || 0}</strong>
-              </span>
-              <span className="text-slate-700 hidden sm:inline">|</span>
-              <span className="flex items-center gap-1.5">
-                <span>🇬🇧</span> English: <strong className="text-sky-300 text-sm">{stats.languages?.en || 0}</strong>
-              </span>
-              <span className="text-slate-700 hidden sm:inline">|</span>
-              <span className="flex items-center gap-1.5 text-rose-300">
-                <Flame className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
-                High Urgency: <strong className="text-white text-sm">{stats.urgencies?.high || 0}</strong>
+              <span className="text-xl font-bold text-slate-900 mt-1 block">
+                {stats.total}
               </span>
             </div>
-            <div className="text-[11px] text-slate-400 hidden md:block">
-              Engine: <span className="text-emerald-400 font-mono font-semibold">Gemini 3.8 Flash</span>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Pending Triage
+              </span>
+              <span className="text-xl font-bold text-slate-900 mt-1 block">
+                {stats.unresolved ?? (stats.total - (stats.statuses?.resolved || 0))}
+              </span>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Language Ratio
+              </span>
+              <div className="text-sm font-semibold text-slate-800 mt-1.5 flex items-center gap-2">
+                <span>FR: {stats.languages?.fr || 0}</span>
+                <span className="text-slate-300">|</span>
+                <span>EN: {stats.languages?.en || 0}</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                High Priority
+              </span>
+              <span className="text-xl font-bold text-rose-600 mt-1 block">
+                {stats.urgencies?.high || 0}
+              </span>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Model Confidence
+              </span>
+              <span className="text-xl font-bold text-slate-900 mt-1 block font-mono">
+                {(stats.avg_confidence * 100).toFixed(0)}%
+              </span>
             </div>
           </div>
         )}
 
-        {/* Filters and Search Bar */}
-        <div className="mt-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            {/* Search Input */}
+        {/* Unified Search and Filtering Toolbar */}
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5 space-y-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
@@ -332,69 +462,74 @@ export default function App() {
                 placeholder="Search ticket text, customer name, summary..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition"
               />
             </div>
 
-            <div className="text-xs text-slate-500 font-medium">
-              Showing <span className="font-bold text-slate-800">{filteredTickets.length}</span> of <span className="font-bold text-slate-800">{tickets.length}</span> tickets
+            <div className="text-xs text-slate-500 self-center sm:self-auto">
+              Displaying <span className="font-semibold text-slate-900">{filteredTickets.length}</span> of <span className="font-semibold text-slate-900">{tickets.length}</span> tickets
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1">Filter:</span>
+          <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-100">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 mr-1">
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filters:</span>
+            </div>
 
-            {/* Language filter pills */}
-            <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs">
+            {/* Language Segmented Control */}
+            <div className="flex bg-slate-100 p-0.5 rounded-md text-xs">
               <button
+                type="button"
                 onClick={() => setLanguageFilter('all')}
-                className={`px-2.5 py-1 rounded-md transition ${languageFilter === 'all' ? 'bg-white font-bold text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                className={`px-2.5 py-1 rounded transition ${languageFilter === 'all' ? 'bg-white font-medium text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
               >
                 All Languages
               </button>
               <button
+                type="button"
                 onClick={() => setLanguageFilter('fr')}
-                className={`px-2.5 py-1 rounded-md transition ${languageFilter === 'fr' ? 'bg-white font-bold text-amber-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                className={`px-2.5 py-1 rounded transition ${languageFilter === 'fr' ? 'bg-white font-medium text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
               >
-                🇫🇷 French
+                French (FR)
               </button>
               <button
+                type="button"
                 onClick={() => setLanguageFilter('en')}
-                className={`px-2.5 py-1 rounded-md transition ${languageFilter === 'en' ? 'bg-white font-bold text-sky-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                className={`px-2.5 py-1 rounded transition ${languageFilter === 'en' ? 'bg-white font-medium text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
               >
-                🇬🇧 English
+                English (EN)
               </button>
             </div>
 
-            {/* Category dropdown */}
+            {/* Category Dropdown */}
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="text-xs border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="text-xs bg-white border border-slate-200 rounded-md px-2.5 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600"
             >
               {CATEGORIES.map(cat => (
                 <option key={cat.id} value={cat.id}>{cat.label}</option>
               ))}
             </select>
 
-            {/* Urgency dropdown */}
+            {/* Urgency Dropdown */}
             <select
               value={urgencyFilter}
               onChange={(e) => setUrgencyFilter(e.target.value)}
-              className="text-xs border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="text-xs bg-white border border-slate-200 rounded-md px-2.5 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600"
             >
-              <option value="all">All Urgencies</option>
-              <option value="high">🔥 High Urgency</option>
-              <option value="medium">Medium Urgency</option>
-              <option value="low">Low Urgency</option>
+              <option value="all">All Priorities</option>
+              <option value="high">High Priority</option>
+              <option value="medium">Medium Priority</option>
+              <option value="low">Low Priority</option>
             </select>
 
-            {/* Status dropdown */}
+            {/* Status Dropdown */}
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="text-xs border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="text-xs bg-white border border-slate-200 rounded-md px-2.5 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600"
             >
               <option value="all">All Statuses</option>
               <option value="new">New</option>
@@ -402,197 +537,227 @@ export default function App() {
               <option value="resolved">Resolved</option>
             </select>
 
-            {(languageFilter !== 'all' || categoryFilter !== 'all' || urgencyFilter !== 'all' || statusFilter !== 'all' || searchQuery !== '') && (
+            {isFilterActive && (
               <button
-                onClick={() => {
-                  setLanguageFilter('all');
-                  setCategoryFilter('all');
-                  setUrgencyFilter('all');
-                  setStatusFilter('all');
-                  setSearchQuery('');
-                }}
-                className="text-xs text-blue-600 hover:underline font-medium ml-auto"
+                type="button"
+                onClick={resetFilters}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium ml-auto"
               >
                 Reset filters
               </button>
             )}
           </div>
         </div>
-      </header>
 
-      {/* Ticket List */}
-      <main>
-        {loading && tickets.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-2xl border border-slate-200">
-            <RefreshCw className="w-8 h-8 mx-auto text-blue-600 animate-spin mb-3" />
-            <p className="text-slate-500 text-sm">Loading tickets from database...</p>
-          </div>
-        ) : filteredTickets.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-2xl border border-slate-200 shadow-xs">
-            <Inbox className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-            <h3 className="text-base font-bold text-slate-800">No tickets found</h3>
-            <p className="text-slate-500 text-sm mt-1 max-w-sm mx-auto">
-              Click <strong>"Seed 16 Tickets"</strong> or use <strong>"New Ticket"</strong> to submit and route customer messages through Gemini.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredTickets.map((ticket) => {
-              const isExpanded = expandedTicketId === ticket.id;
-              const isFrench = ticket.detected_language === 'fr';
+        {/* Tickets Feed */}
+        <main>
+          {loading && tickets.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-lg border border-slate-200">
+              <RefreshCw className="w-6 h-6 mx-auto text-slate-400 animate-spin mb-2" />
+              <p className="text-slate-500 text-xs">Retrieving ticket records...</p>
+            </div>
+          ) : filteredTickets.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-lg border border-slate-200">
+              <Inbox className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+              <h3 className="text-sm font-semibold text-slate-800">No matching tickets</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                No tickets match your active filter criteria. Adjust the filters or click "Seed Dataset" to populate realistic entries.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {filteredTickets.map((ticket) => {
+                const isExpanded = expandedTicketId === ticket.id;
+                const isFrench = ticket.detected_language === 'fr';
 
-              return (
-                <div
-                  key={ticket.id}
-                  className={`bg-white rounded-xl border transition shadow-xs overflow-hidden ${
-                    ticket.status === 'resolved' 
-                      ? 'border-slate-200 opacity-75 bg-slate-50/50' 
-                      : ticket.urgency === 'high' 
-                        ? 'border-rose-300 hover:border-rose-400' 
-                        : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="p-5">
-                    {/* Top Row: Meta, Badges, Category, Status */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-bold text-slate-400">#{ticket.id}</span>
-                        <span className="font-bold text-slate-800 text-sm">{ticket.customer_name}</span>
-                        <span className="text-xs text-slate-400">&bull; {ticket.customer_email}</span>
-                      </div>
-
-                      <div className="flex items-center flex-wrap gap-2">
-                        {getLanguageBadge(ticket.detected_language)}
-                        {getCategoryBadge(ticket.category)}
-                        {getUrgencyBadge(ticket.urgency)}
-                        {getStatusBadge(ticket.status)}
-                        
-                        <span className="text-xs text-slate-400 flex items-center gap-1 ml-1">
-                          <Clock className="w-3 h-3" />
-                          {new Date(ticket.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Original Ticket Content */}
-                    <div className="mb-4">
-                      <p className="text-sm text-slate-800 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 font-sans">
-                        "{ticket.original_text}"
-                      </p>
-                    </div>
-
-                    {/* Cross-Lingual AI Translation & Summary Card */}
-                    <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 border border-blue-200 rounded-lg p-3.5 shadow-xs">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900">
-                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                          {isFrench ? '🇬🇧 English Summary for Support Team:' : '🇫🇷 Résumé Français pour l\'équipe Support:'}
-                        </div>
-                        {ticket.confidence_score && (
-                          <span className="text-[11px] text-blue-700 font-mono font-semibold">
-                            Confidence: {(ticket.confidence_score * 100).toFixed(0)}%
+                return (
+                  <article
+                    key={ticket.id}
+                    className={`bg-white border rounded-lg transition-colors overflow-hidden ${
+                      ticket.status === 'resolved' 
+                        ? 'border-slate-200 opacity-80' 
+                        : ticket.urgency === 'high' 
+                          ? 'border-rose-300 hover:border-rose-400' 
+                          : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="p-4 sm:p-5">
+                      {/* Ticket Header & Metadata */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono font-medium text-slate-400">
+                            #{ticket.id}
                           </span>
-                        )}
-                      </div>
-                      <p className="text-sm font-medium text-slate-900 leading-normal">
-                        {ticket.translated_summary || 'Analyzing ticket summary...'}
-                      </p>
-                    </div>
+                          <span className="font-semibold text-slate-900 text-sm">
+                            {ticket.customer_name}
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            &bull; {ticket.customer_email}
+                          </span>
+                        </div>
 
-                    {/* Action & Metadata Row */}
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setExpandedTicketId(isExpanded ? null : ticket.id)}
-                          className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 transition font-medium"
-                        >
-                          {isExpanded ? (
-                            <><span>Hide Gemini reasoning</span><ChevronUp className="w-3.5 h-3.5" /></>
-                          ) : (
-                            <><span>Inspect Gemini reasoning</span><ChevronDown className="w-3.5 h-3.5" /></>
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          {renderLanguageBadge(ticket.detected_language)}
+                          {renderCategoryBadge(ticket.category)}
+                          {renderUrgencyBadge(ticket.urgency)}
+                          {renderStatusBadge(ticket.status)}
+                          
+                          <span className="text-[11px] text-slate-400 flex items-center gap-1 ml-1 font-mono">
+                            <Clock className="w-3 h-3" />
+                            {new Date(ticket.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Original Customer Message */}
+                      <div className="mb-3.5">
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                          Incoming Message ({ticket.detected_language?.toUpperCase() || 'RAW'}):
+                        </span>
+                        <div className="text-xs text-slate-800 leading-relaxed bg-slate-50 p-3 rounded-md border border-slate-200/60 font-sans">
+                          {ticket.original_text}
+                        </div>
+                      </div>
+
+                      {/* Cross-Lingual Triage Translation & Summary */}
+                      <div className="bg-blue-50/40 border border-blue-200/70 rounded-md p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-900">
+                            <ArrowRightLeft className="w-3.5 h-3.5 text-blue-600" />
+                            <span>
+                              {isFrench 
+                                ? 'Cross-Lingual Summary (Target: English)' 
+                                : 'Cross-Lingual Summary (Target: French)'}
+                            </span>
+                          </div>
+                          {typeof ticket.confidence_score === 'number' && (
+                            <span className="text-[11px] text-blue-700 font-mono font-medium">
+                              Confidence: {(ticket.confidence_score * 100).toFixed(0)}%
+                            </span>
                           )}
+                        </div>
+                        <p className="text-xs font-medium text-slate-800 leading-relaxed">
+                          {ticket.translated_summary || 'Triage summary pending...'}
+                        </p>
+                      </div>
+
+                      {/* Card Footer: Diagnostics Toggle & Workflow Actions */}
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-100 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedTicketId(isExpanded ? null : ticket.id)}
+                          className="text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium transition"
+                        >
+                          <span>{isExpanded ? 'Hide Triage Audit' : 'Inspect Triage Audit'}</span>
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400">Workflow:</span>
+                          {ticket.status !== 'new' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusChange(ticket.id, 'new')}
+                              className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-100 transition"
+                            >
+                              New
+                            </button>
+                          )}
+                          {ticket.status !== 'in_progress' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusChange(ticket.id, 'in_progress')}
+                              className="px-2 py-0.5 rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition font-medium"
+                            >
+                              In Progress
+                            </button>
+                          )}
+                          {ticket.status !== 'resolved' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusChange(ticket.id, 'resolved')}
+                              className="px-2 py-0.5 rounded border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition font-medium"
+                            >
+                              Resolve
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Status Toggle Action Buttons */}
-                      <div className="flex items-center gap-1 text-xs">
-                        <span className="text-slate-400 mr-1">Status:</span>
-                        {ticket.status !== 'new' && (
-                          <button
-                            onClick={() => handleStatusChange(ticket.id, 'new')}
-                            className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-100 transition"
-                          >
-                            New
-                          </button>
-                        )}
-                        {ticket.status !== 'in_progress' && (
-                          <button
-                            onClick={() => handleStatusChange(ticket.id, 'in_progress')}
-                            className="px-2 py-0.5 rounded border border-yellow-300 text-yellow-800 bg-yellow-50 hover:bg-yellow-100 transition font-medium"
-                          >
-                            In Progress
-                          </button>
-                        )}
-                        {ticket.status !== 'resolved' && (
-                          <button
-                            onClick={() => handleStatusChange(ticket.id, 'resolved')}
-                            className="px-2 py-0.5 rounded border border-green-300 text-green-800 bg-green-50 hover:bg-green-100 transition font-medium"
-                          >
-                            Resolve
-                          </button>
-                        )}
-                      </div>
+                      {/* Collapsible Diagnostic Audit Drawer */}
+                      {isExpanded && (
+                        <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-700 space-y-2">
+                          <div className="font-semibold text-slate-800 text-[11px] uppercase tracking-wider pb-1 border-b border-slate-200">
+                            Deterministic Model Audit Trail
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <span className="text-slate-500 block">Language Detection:</span>
+                              <span className="font-medium text-slate-800">{ticket.detected_language === 'fr' ? 'French (fr)' : 'English (en)'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block">Assigned Queue:</span>
+                              <span className="font-medium text-slate-800">{ticket.category}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block">Urgency Assessment:</span>
+                              <span className="font-medium text-slate-800">{ticket.urgency}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block">Payload Size:</span>
+                              <span className="font-medium text-slate-800">{ticket.original_text.length} characters</span>
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5">Classification Reasoning:</span>
+                            <p className="text-slate-700 bg-white p-2 rounded border border-slate-200/60 leading-relaxed font-sans">
+                              {ticket.reasoning || 'Classification inferred from semantic vocabulary and intent analysis.'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-
-                    {/* Collapsible Gemini structured reasoning drawer */}
-                    {isExpanded && (
-                      <div className="mt-3 p-3.5 bg-slate-900 text-slate-200 rounded-lg text-xs font-mono space-y-1 overflow-x-auto shadow-inner">
-                        <div className="text-slate-400 mb-1">// Gemini Structured Output Diagnostic</div>
-                        <div>Detected Language: <span className="text-emerald-400">{ticket.detected_language}</span></div>
-                        <div>Assigned Queue: <span className="text-indigo-400">{ticket.category}</span></div>
-                        <div>Urgency Assessment: <span className={ticket.urgency === 'high' ? 'text-rose-400 font-bold' : 'text-amber-400'}>{ticket.urgency}</span></div>
-                        <div>Model Reasoning: <span className="text-slate-300">{ticket.reasoning || 'Triage completed based on customer vocabulary and intent.'}</span></div>
-                        <div>Input Length: <span className="text-slate-400">{ticket.original_text.length} characters</span></div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
 
       {/* New Ticket Modal */}
       {showNewModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
-            <h2 className="text-lg font-bold text-slate-900 mb-1">Create Support Ticket</h2>
-            <p className="text-xs text-slate-500 mb-4">
-              Submit a ticket in English or French. Gemini will automatically detect language, classify category, assess urgency, and produce a cross-lingual summary.
+          <div className="bg-white rounded-lg max-w-lg w-full p-5 sm:p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h2 className="text-base font-semibold text-slate-900">
+                Submit Support Ticket
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowNewModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 mt-2 mb-3">
+              Input a customer message in English or French. Gemini will automatically classify category, assess urgency, and produce a cross-lingual summary.
             </p>
 
-            {/* Quick Demo Preset Pills */}
+            {/* Quick Presets */}
             <div className="mb-4">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                Quick Demo Presets (1-Click Fill):
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">
+                Quick Demonstration Scenarios:
               </span>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_PROMPTS.map((preset, idx) => (
+              <div className="grid grid-cols-2 gap-1.5">
+                {PRESET_SCENARIOS.map((preset) => (
                   <button
-                    key={idx}
+                    key={preset.id}
                     type="button"
-                    onClick={() => {
-                      setOriginalText(preset.text);
-                      if (preset.text.startsWith("Bonjour") || preset.text.startsWith("C'est")) {
-                        setCustomerName("Jean-Luc Laurent");
-                        setCustomerEmail("jeanluc@enterprise.fr");
-                      } else {
-                        setCustomerName("Alex Rivera");
-                        setCustomerEmail("alex.r@apextech.com");
-                      }
-                    }}
-                    className="text-[11px] bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 px-2.5 py-1 rounded-md border border-slate-200 transition"
+                    onClick={() => applyPreset(preset)}
+                    className="text-left text-xs bg-slate-50 hover:bg-slate-100 text-slate-700 px-2.5 py-1.5 rounded border border-slate-200 transition truncate"
                   >
                     {preset.label}
                   </button>
@@ -600,59 +765,67 @@ export default function App() {
               </div>
             </div>
 
-            <form onSubmit={handleCreateTicket} className="space-y-3.5">
+            <form onSubmit={handleCreateTicket} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Customer Name</label>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Customer Name
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. Jean Dupont or Alice Smith"
+                  placeholder="e.g. Jean-Luc Laurent"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full text-xs border border-slate-300 rounded-md px-3 py-2 focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Customer Email</label>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Customer Email
+                </label>
                 <input
                   type="email"
-                  placeholder="e.g. customer@example.com"
+                  placeholder="e.g. j.laurent@enterprise.fr"
                   value={customerEmail}
                   onChange={(e) => setCustomerEmail(e.target.value)}
-                  className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full text-xs border border-slate-300 rounded-md px-3 py-2 focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none"
                 />
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs font-semibold text-slate-700">Ticket Message (EN or FR)</label>
-                  <span className="text-[10px] text-slate-400">{originalText.length} characters</span>
+                  <label className="block text-xs font-medium text-slate-700">
+                    Ticket Message (English or French)
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {originalText.length} chars
+                  </span>
                 </div>
                 <textarea
                   rows={4}
                   required
-                  placeholder="Enter message in French or English..."
+                  placeholder="Type or paste customer inquiry in French or English..."
                   value={originalText}
                   onChange={(e) => setOriginalText(e.target.value)}
-                  className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full text-xs border border-slate-300 rounded-md px-3 py-2 focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none leading-relaxed"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowNewModal(false)}
-                  className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition"
+                  className="px-3.5 py-1.5 border border-slate-300 rounded-md text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creating}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition shadow-sm disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition disabled:opacity-50"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  {creating ? 'Routing with Gemini...' : 'Route Ticket'}
+                  {creating && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{creating ? 'Triaging with Gemini...' : 'Analyze & Create Ticket'}</span>
                 </button>
               </div>
             </form>

@@ -1,24 +1,24 @@
 # Bilingual (EN/FR) Support Ticket Router
 
-An AI-powered customer support triage system that automatically detects whether a ticket is written in English or French, classifies it into business queues, estimates urgency, and provides an actionable cross-lingual executive summary for support agents.
+An automated customer support triage system that detects whether an incoming ticket is written in English or French, classifies it into business queues, assesses urgency, and produces an actionable cross-lingual executive summary for support agents.
 
 ---
 
-## 🌟 Tech Stack
+## Tech Stack
 
 - **Backend**: Python 3.14, Django 5.2, Django REST Framework (DRF)
-- **Database**: SQLite (Local development) / PostgreSQL (Production ready)
-- **AI Triage Layer**: Google Gemini 3.8 Flash via the official `google-genai` SDK with Pydantic structured outputs
+- **Database**: SQLite (Local rapid development) / PostgreSQL (Production toggle via `USE_POSTGRES=True`)
+- **AI Triage Layer**: Google Gemini 3.8 Flash via official `google-genai` SDK with Pydantic structured schemas and automated failover (`gemini-3.8-flash` -> `gemini-3.5-flash-lite`)
 - **Frontend**: React 19, Vite, Tailwind CSS, Lucide Icons
 
 ---
 
-## ⚡ Core Features
+## Core Features
 
 1. **Bilingual Detection & Cross-Lingual Summaries**:
-   - Analyzes incoming messages in **English** or **French**.
-   - If French $\rightarrow$ generates a 1-2 sentence **English summary** for English-speaking agents.
-   - If English $\rightarrow$ generates a 1-2 sentence **French summary** for French-speaking agents.
+   - Detects ticket language as **English (EN)** or **French (FR)**.
+   - For French tickets: Generates a concise **English summary** for English-speaking agents.
+   - For English tickets: Generates a concise **French summary** for French-speaking agents.
 2. **Business Categorization**:
    - `billing`: Invoices, overcharges, refunds, subscriptions.
    - `technical_issue`: 500 errors, bugs, API timeouts, authentication failures.
@@ -26,15 +26,16 @@ An AI-powered customer support triage system that automatically detects whether 
    - `complaint`: Dissatisfied customers, service delays, escalations.
 3. **Urgency Assessment**:
    - Automatically triaged into `low`, `medium`, or `high` urgency based on customer sentiment and operational severity.
-4. **Interactive Dashboard**:
-   - Real-time analytics ribbon (total tickets, language breakdown, urgency counts, average AI confidence).
-   - Multi-dimensional filters (Language, Category, Urgency, Status, and search text).
-   - One-click workflow status updates (`New` $\rightarrow$ `In Progress` $\rightarrow$ `Resolved`).
-   - One-click demo presets and mock ticket seeding.
+4. **Operations Cockpit**:
+   - Live KPI overview (total ingested, pending triage, language distribution, high priority count, mean confidence).
+   - Multi-dimensional filter toolbar (Language, Category, Urgency, Status, and full-text search).
+   - One-click workflow status transitions (`New` -> `In Progress` -> `Resolved`).
+   - One-click demonstration presets and dataset seeding.
+   - Deterministic model audit trail drawer for inspecting Gemini's classification rationale.
 
 ---
 
-## 🚀 Quick Start (Local Development with WSL Ubuntu)
+## Quick Start (Local Development)
 
 ### 1. Clone the repository
 ```bash
@@ -43,11 +44,14 @@ cd bilingual-support-ticket-router
 ```
 
 ### 2. Configure Environment Variables
-Copy the template and add your Gemini API key:
+Copy the template and supply your Gemini API key:
 ```bash
 cp backend/.env.example backend/.env
 ```
-*(An offline fallback classifier is pre-wired, so the app runs smoothly even before adding an API key!)*
+In `backend/.env`, set:
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+```
 
 ### 3. Start the Django Backend
 ```bash
@@ -56,22 +60,33 @@ source venv/bin/activate
 python manage.py migrate
 python manage.py runserver
 ```
-The API will be live at `http://127.0.0.1:8000/api/tickets/`
+The REST API is live at `http://127.0.0.1:8000/api/tickets/`
 
 ### 4. Start the React Frontend
-In a new terminal:
+In a separate terminal:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-The UI will be live at `http://localhost:5173`
+The interface is live at `http://localhost:5173`
 
 ---
 
-## 🧪 Running the Verification Script
+## REST API Endpoints
 
-To test the AI triage pipeline and database operations from the command line:
+- `GET /api/tickets/`: List and filter tickets (`?language=`, `?category=`, `?urgency=`, `?status=`).
+- `POST /api/tickets/`: Ingest a new ticket (automatically triaged via Gemini).
+- `GET /api/tickets/stats/`: Aggregated operations metrics (counts, breakdown, confidence).
+- `PATCH /api/tickets/{id}/set_status/`: Update ticket workflow state (`new`, `in_progress`, `resolved`).
+- `POST /api/tickets/seed/`: Populate 16 realistic bilingual sample tickets.
+- `DELETE /api/tickets/clear/`: Reset database for clean testing.
+
+---
+
+## Verification & Testing
+
+To execute the automated pipeline verification script:
 ```bash
 cd backend
 python test_pipeline.py
@@ -79,6 +94,13 @@ python test_pipeline.py
 
 ---
 
-## 📄 License
-MIT
+## Architecture Decisions
 
+- **Deterministic Structured Output**: Uses Pydantic schemas via Gemini's constrained decoding (`response_json_schema`) with low temperature (0.1) to eliminate hallucinated JSON structures.
+- **Model Resilience**: Automatically falls over from `gemini-3.8-flash` to `gemini-3.5-flash-lite` on transient 503 capacity errors.
+- **Production UI**: Custom-built support dashboard adhering to strict functional UX standards without placeholder templates or decorative fluff.
+
+---
+
+## License
+MIT
